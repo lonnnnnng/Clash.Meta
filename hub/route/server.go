@@ -5,11 +5,13 @@ import (
 	"context"
 	"crypto/subtle"
 	"encoding/json"
+	"errors"
 	"net"
 	"os"
 	"path/filepath"
 	"runtime/debug"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -33,16 +35,43 @@ import (
 var (
 	uiPath = ""
 
-	httpServer *http.Server
-	tlsServer  *http.Server
-	unixServer *http.Server
-	pipeServer *http.Server
+	controllerMu sync.Mutex
+	httpServer   *controllerServer
+	tlsServer    *controllerServer
+	unixServer   *controllerServer
+	pipeServer   *controllerServer
 
 	embedMode = false
 )
 
 func SetEmbedMode(embed bool) {
+	controllerMu.Lock()
+	defer controllerMu.Unlock()
 	embedMode = embed
+}
+
+type controllerServer struct {
+	server   *http.Server
+	listener net.Listener
+}
+
+func (s *controllerServer) close() {
+	if s == nil {
+		return
+	}
+	_ = s.server.Close()
+	// 作者 long：重建可能早于Serve登记listener；仅Server.Close不能在该窗口释放端口，同址重绑必须显式回收它。
+	_ = s.listener.Close()
+}
+
+func serveController(server *http.Server, listener net.Listener, kind string) *controllerServer {
+	managed := &controllerServer{server: server, listener: listener}
+	go func() {
+		if err := server.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Errorln("External controller %s serve error: %s", kind, err)
+		}
+	}()
+	return managed
 }
 
 type Traffic struct {
@@ -90,15 +119,22 @@ func (c Cors) Apply(r chi.Router) {
 }
 
 func ReCreateServer(cfg *Config) {
-	go start(cfg)
-	go startTLS(cfg)
-	go startUnix(cfg)
+	controllerMu.Lock()
+	defer controllerMu.Unlock()
+	// 作者 long：入口同步完成旧监听关闭及新监听准备，防止旧异步请求迟到后覆盖新地址/密钥或重新打开已关闭的服务。
+	snapshot := *cfg
+	snapshot.Cors.AllowOrigins = append([]string(nil), cfg.Cors.AllowOrigins...)
+	start(&snapshot)
+	startTLS(&snapshot)
+	startUnix(&snapshot)
 	if inbound.SupportNamedPipe {
-		go startPipe(cfg)
+		startPipe(&snapshot)
 	}
 }
 
 func SetUIPath(path string) {
+	controllerMu.Lock()
+	defer controllerMu.Unlock()
 	uiPath = C.Path.Resolve(path)
 }
 
@@ -161,10 +197,8 @@ func router(isDebug bool, secret string, dohServer string, cors Cors) *chi.Mux {
 
 func start(cfg *Config) {
 	// first stop existing server
-	if httpServer != nil {
-		_ = httpServer.Close()
-		httpServer = nil
-	}
+	httpServer.close()
+	httpServer = nil
 
 	// handle addr
 	if len(cfg.Addr) > 0 {
@@ -180,17 +214,14 @@ func start(cfg *Config) {
 		server := &http.Server{
 			Handler: router(cfg.IsDebug, cfg.Secret, cfg.DohServer, cfg.Cors),
 		}
-		httpServer = server
-		_ = server.Serve(l)
+		httpServer = serveController(server, l, "http")
 	}
 }
 
 func startTLS(cfg *Config) {
 	// first stop existing server
-	if tlsServer != nil {
-		_ = tlsServer.Close()
-		tlsServer = nil
-	}
+	tlsServer.close()
+	tlsServer = nil
 
 	// handle tlsAddr
 	if len(cfg.TLSAddr) > 0 {
@@ -200,15 +231,6 @@ func startTLS(cfg *Config) {
 			return
 		}
 
-		lc := inbound.NewListenConfig()
-		lc.SetRouteMark(cfg.RoutingMark)
-		l, err := lc.Listen(context.Background(), "tcp", cfg.TLSAddr)
-		if err != nil {
-			log.Errorln("External controller tls listen error: %s", err)
-			return
-		}
-
-		log.Infoln("RESTful API tls listening at: %s", l.Addr().String())
 		tlsConfig := &tls.Config{Time: ntp.Now}
 		tlsConfig.NextProtos = []string{"h2", "http/1.1"}
 		tlsConfig.GetCertificate = func(*tls.ClientHelloInfo) (*tls.Certificate, error) {
@@ -236,22 +258,26 @@ func startTLS(cfg *Config) {
 				return
 			}
 		}
+		// 作者 long：客户端CA或ECH无效时不能占着端口返回；所有可能失败的TLS配置准备完成后才申请listener。
+		lc := inbound.NewListenConfig()
+		lc.SetRouteMark(cfg.RoutingMark)
+		l, err := lc.Listen(context.Background(), "tcp", cfg.TLSAddr)
+		if err != nil {
+			log.Errorln("External controller tls listen error: %s", err)
+			return
+		}
+		log.Infoln("RESTful API tls listening at: %s", l.Addr().String())
 		server := &http.Server{
 			Handler: router(cfg.IsDebug, cfg.Secret, cfg.DohServer, cfg.Cors),
 		}
-		tlsServer = server
-		if err = server.Serve(tls.NewListener(l, tlsConfig)); err != nil {
-			log.Errorln("External controller tls serve error: %s", err)
-		}
+		tlsServer = serveController(server, tls.NewListener(l, tlsConfig), "tls")
 	}
 }
 
 func startUnix(cfg *Config) {
 	// first stop existing server
-	if unixServer != nil {
-		_ = unixServer.Close()
-		unixServer = nil
-	}
+	unixServer.close()
+	unixServer = nil
 
 	// handle addr
 	if len(cfg.UnixAddr) > 0 {
@@ -287,19 +313,14 @@ func startUnix(cfg *Config) {
 		server := &http.Server{
 			Handler: router(cfg.IsDebug, "", cfg.DohServer, cfg.Cors),
 		}
-		unixServer = server
-		if err = server.Serve(l); err != nil {
-			log.Errorln("External controller unix serve error: %s", err)
-		}
+		unixServer = serveController(server, l, "unix")
 	}
 }
 
 func startPipe(cfg *Config) {
 	// first stop existing server
-	if pipeServer != nil {
-		_ = pipeServer.Close()
-		pipeServer = nil
-	}
+	pipeServer.close()
+	pipeServer = nil
 
 	// handle addr
 	if len(cfg.PipeAddr) > 0 {
@@ -318,10 +339,7 @@ func startPipe(cfg *Config) {
 		server := &http.Server{
 			Handler: router(cfg.IsDebug, "", cfg.DohServer, cfg.Cors),
 		}
-		pipeServer = server
-		if err = server.Serve(l); err != nil {
-			log.Errorln("External controller pipe serve error: %s", err)
-		}
+		pipeServer = serveController(server, l, "pipe")
 	}
 }
 

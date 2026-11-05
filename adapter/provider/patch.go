@@ -4,6 +4,8 @@ import (
 	"strings"
 	"sync/atomic"
 	"time"
+
+	P "github.com/metacubex/mihomo/constant/provider"
 )
 
 const fallbackTestTimeout = 5 * time.Second
@@ -20,6 +22,18 @@ func SetDefaultTestTimeout(timeout time.Duration) {
 	if timeout > 0 {
 		defaultTestTimeout.Store(int64(timeout))
 	}
+}
+
+// ConfiguredTestTimeout exposes only the explicit health-check timeout needed
+// by the host's manual probe; an omitted provider timeout remains host-owned.
+func ConfiguredTestTimeout(pp P.ProxyProvider, url string) (time.Duration, bool) {
+	typed, ok := pp.(interface {
+		TestTimeout(string) (time.Duration, bool)
+	})
+	if !ok {
+		return 0, false
+	}
+	return typed.TestTimeout(url)
 }
 
 func (hc *HealthCheck) testTimeout() time.Duration {

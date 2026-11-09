@@ -5,8 +5,8 @@ import (
 	"io"
 	"net"
 	URL "net/url"
-	"runtime"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/metacubex/mihomo/component/ca"
@@ -70,7 +70,6 @@ func HttpRequest(ctx context.Context, url, method string, header map[string][]st
 
 	transport := &http.Transport{
 		// from http.DefaultTransport
-		DisableKeepAlives:     runtime.GOOS == "android",
 		MaxIdleConns:          100,
 		IdleConnTimeout:       30 * time.Second,
 		TLSHandshakeTimeout:   10 * time.Second,
@@ -88,7 +87,27 @@ func HttpRequest(ctx context.Context, url, method string, header map[string][]st
 	}
 
 	client := http.Client{Transport: transport}
-	return client.Do(req)
+	response, err := client.Do(req)
+	if err != nil {
+		transport.CloseIdleConnections()
+		return response, err
+	}
+	// 作者 long：Android强制Connection:close会触发部分代理传输链在响应尾段提前断开。
+	// 本次请求与重定向共用独立Transport，正文关闭后再回收全部空闲连接，既让内容收完整也不遗留后台连接。
+	response.Body = &requestBody{ReadCloser: response.Body, closeIdle: transport.CloseIdleConnections}
+	return response, nil
+}
+
+type requestBody struct {
+	io.ReadCloser
+	closeIdle func()
+	once      sync.Once
+}
+
+func (b *requestBody) Close() error {
+	err := b.ReadCloser.Close()
+	b.once.Do(b.closeIdle)
+	return err
 }
 
 type Option func(opt *option)

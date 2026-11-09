@@ -54,7 +54,7 @@ func UpdateMMDB() (err error) {
 	if buf, err := os.ReadFile(vehicle.Path()); err == nil {
 		oldHash = utils.MakeHash(buf)
 	}
-	data, hash, err := vehicle.Read(context.Background(), oldHash)
+	data, hash, err := readGeoResource("MMDB", vehicle, oldHash)
 	if err != nil {
 		return fmt.Errorf("can't download MMDB database file: %w", err)
 	}
@@ -91,7 +91,7 @@ func UpdateASN() (err error) {
 	if buf, err := os.ReadFile(vehicle.Path()); err == nil {
 		oldHash = utils.MakeHash(buf)
 	}
-	data, hash, err := vehicle.Read(context.Background(), oldHash)
+	data, hash, err := readGeoResource("ASN", vehicle, oldHash)
 	if err != nil {
 		return fmt.Errorf("can't download ASN database file: %w", err)
 	}
@@ -130,7 +130,7 @@ func UpdateGeoIp() (err error) {
 	if buf, err := os.ReadFile(vehicle.Path()); err == nil {
 		oldHash = utils.MakeHash(buf)
 	}
-	data, hash, err := vehicle.Read(context.Background(), oldHash)
+	data, hash, err := readGeoResource("GEOIP", vehicle, oldHash)
 	if err != nil {
 		return fmt.Errorf("can't download GeoIP database file: %w", err)
 	}
@@ -166,7 +166,7 @@ func UpdateGeoSite() (err error) {
 	if buf, err := os.ReadFile(vehicle.Path()); err == nil {
 		oldHash = utils.MakeHash(buf)
 	}
-	data, hash, err := vehicle.Read(context.Background(), oldHash)
+	data, hash, err := readGeoResource("GEOSITE", vehicle, oldHash)
 	if err != nil {
 		return fmt.Errorf("can't download GeoSite database file: %w", err)
 	}

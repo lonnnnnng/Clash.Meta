@@ -3,6 +3,7 @@ package config
 import (
 	"errors"
 	"fmt"
+	"github.com/metacubex/mihomo/component/preflight"
 	"net"
 	"net/netip"
 	"net/url"
@@ -627,6 +628,7 @@ func ParseRawConfig(rawCfg *RawConfig) (*Config, error) {
 	log.Infoln("Start initial configuration in progress") //Segment finished in xxm
 	startTime := time.Now()
 
+	preflight.Location("general", -1)
 	general, err := parseGeneral(rawCfg)
 	if err != nil {
 		return nil, err
@@ -639,42 +641,49 @@ func ParseRawConfig(rawCfg *RawConfig) (*Config, error) {
 	rollback := temporaryUpdateGeneral(config.General)
 	defer rollback()
 
+	preflight.Location("external-controller", -1)
 	controller, err := parseController(rawCfg)
 	if err != nil {
 		return nil, err
 	}
 	config.Controller = controller
 
+	preflight.Location("experimental", -1)
 	experimental, err := parseExperimental(rawCfg)
 	if err != nil {
 		return nil, err
 	}
 	config.Experimental = experimental
 
+	preflight.Location("iptables", -1)
 	iptables, err := parseIPTables(rawCfg)
 	if err != nil {
 		return nil, err
 	}
 	config.IPTables = iptables
 
+	preflight.Location("ntp", -1)
 	ntpCfg, err := parseNTP(rawCfg)
 	if err != nil {
 		return nil, err
 	}
 	config.NTP = ntpCfg
 
+	preflight.Location("profile", -1)
 	profile, err := parseProfile(rawCfg)
 	if err != nil {
 		return nil, err
 	}
 	config.Profile = profile
 
+	preflight.Location("tls", -1)
 	tlsCfg, err := parseTLS(rawCfg)
 	if err != nil {
 		return nil, err
 	}
 	config.TLS = tlsCfg
 
+	preflight.Location("proxies", -1)
 	proxies, providers, err := parseProxies(rawCfg)
 	if err != nil {
 		return nil, err
@@ -682,6 +691,7 @@ func ParseRawConfig(rawCfg *RawConfig) (*Config, error) {
 	config.Proxies = proxies
 	config.Providers = providers
 
+	preflight.Location("listeners", -1)
 	listeners, err := parseListeners(rawCfg)
 	if err != nil {
 		return nil, err
@@ -690,24 +700,28 @@ func ParseRawConfig(rawCfg *RawConfig) (*Config, error) {
 
 	log.Infoln("Geodata Loader mode: %s", geodata.LoaderName())
 	log.Infoln("Geosite Matcher implementation: %s", geodata.SiteMatcherName())
+	preflight.Location("rule-providers", -1)
 	ruleProviders, err := parseRuleProviders(rawCfg)
 	if err != nil {
 		return nil, err
 	}
 	config.RuleProviders = ruleProviders
 
+	preflight.Location("sub-rules", -1)
 	subRules, err := parseSubRules(rawCfg, proxies, ruleProviders)
 	if err != nil {
 		return nil, err
 	}
 	config.SubRules = subRules
 
+	preflight.Location("rules", -1)
 	rules, err := parseRules(rawCfg.Rule, proxies, ruleProviders, subRules, "rules")
 	if err != nil {
 		return nil, err
 	}
 	config.Rules = rules
 
+	preflight.Location("hosts", -1)
 	hosts, err := parseHosts(rawCfg)
 	if err != nil {
 		return nil, err
@@ -716,17 +730,20 @@ func ParseRawConfig(rawCfg *RawConfig) (*Config, error) {
 
 	parseIPV6(rawCfg) // must before DNS and Tun
 
+	preflight.Location("dns", -1)
 	dnsCfg, err := parseDNS(rawCfg, ruleProviders)
 	if err != nil {
 		return nil, err
 	}
 	config.DNS = dnsCfg
 
+	preflight.Location("tun", -1)
 	err = parseTun(rawCfg.Tun, dnsCfg, config.General)
 	if err != nil {
 		return nil, err
 	}
 
+	preflight.Location("tuic-server", -1)
 	err = parseTuicServer(rawCfg.TuicServer, config.General)
 	if err != nil {
 		return nil, err
@@ -744,6 +761,7 @@ func ParseRawConfig(rawCfg *RawConfig) (*Config, error) {
 		}
 	}
 
+	preflight.Location("sniffer", -1)
 	config.Sniffer, err = parseSniffer(rawCfg.Sniffer, ruleProviders)
 	if err != nil {
 		return nil, err
@@ -882,6 +900,7 @@ func parseProxies(cfg *RawConfig) (proxies map[string]C.Proxy, providersMap map[
 	providersMap = make(map[string]P.ProxyProvider)
 	proxiesConfig := cfg.Proxy
 	groupsConfig := cfg.ProxyGroup
+	originalGroupIndexes := map[string]int{}
 	providersConfig := cfg.ProxyProvider
 
 	var (
@@ -900,6 +919,7 @@ func parseProxies(cfg *RawConfig) (proxies map[string]C.Proxy, providersMap map[
 
 	// parse proxy
 	for idx, mapping := range proxiesConfig {
+		preflight.Location("proxies", idx)
 		proxy, err := adapter.ParseProxy(mapping, adapter.WithTunnelForAPI(T.Tunnel))
 		if err != nil {
 			return nil, nil, fmt.Errorf("proxy %d: %w", idx, err)
@@ -915,9 +935,13 @@ func parseProxies(cfg *RawConfig) (proxies map[string]C.Proxy, providersMap map[
 
 	// keep the original order of ProxyGroups in config file
 	for idx, mapping := range groupsConfig {
+		preflight.Location("proxy-groups", idx)
 		groupName, existName := mapping["name"].(string)
 		if !existName {
 			return nil, nil, fmt.Errorf("proxy group %d: missing name", idx)
+		}
+		if preflight.Enabled() {
+			originalGroupIndexes[groupName] = idx
 		}
 		if groupName == "GLOBAL" {
 			hasGlobal = true
@@ -925,6 +949,7 @@ func parseProxies(cfg *RawConfig) (proxies map[string]C.Proxy, providersMap map[
 		proxyList = append(proxyList, groupName)
 	}
 
+	preflight.Location("proxy-groups", -1)
 	// check if any loop exists and sort the ProxyGroups
 	if err := proxyGroupsDagSort(groupsConfig); err != nil {
 		return nil, nil, err
@@ -933,6 +958,7 @@ func parseProxies(cfg *RawConfig) (proxies map[string]C.Proxy, providersMap map[
 	var AllProviders []string
 	// parse and initial providers
 	for name, mapping := range providersConfig {
+		preflight.Location("proxy-providers", -1)
 		if name == provider.ReservedName {
 			return nil, nil, fmt.Errorf("can not defined a provider called `%s`", provider.ReservedName)
 		}
@@ -951,6 +977,13 @@ func parseProxies(cfg *RawConfig) (proxies map[string]C.Proxy, providersMap map[
 
 	// parse proxy group
 	for idx, mapping := range groupsConfig {
+		originalIndex := idx
+		if preflight.Enabled() {
+			if name, ok := mapping["name"].(string); ok {
+				originalIndex = originalGroupIndexes[name]
+			}
+		}
+		preflight.Location("proxy-groups", originalIndex)
 		group, err := outboundgroup.ParseProxyGroup(mapping, proxies, providersMap, AllProxies, AllProviders)
 		if err != nil {
 			return nil, nil, fmt.Errorf("proxy group[%d]: %w", idx, err)
@@ -1002,6 +1035,7 @@ func parseProxies(cfg *RawConfig) (proxies map[string]C.Proxy, providersMap map[
 func parseListeners(cfg *RawConfig) (listeners map[string]C.InboundListener, err error) {
 	listeners = make(map[string]C.InboundListener)
 	for index, mapping := range cfg.Listeners {
+		preflight.Location("listeners", index)
 		inboundListener, err := listener.ParseListener(mapping)
 		if err != nil {
 			return nil, fmt.Errorf("listener %d: %w", index, err)
@@ -1101,6 +1135,9 @@ func parseRules(rulesConfig []string, proxies map[string]C.Proxy, ruleProviders 
 
 	// parse rules
 	for idx, line := range rulesConfig {
+		if format == "rules" {
+			preflight.Location("rules", idx)
+		}
 		tp, payload, target, params := RC.ParseRulePayload(line, true)
 		if target == "" {
 			return nil, fmt.Errorf("%s[%d] [%s] error: format invalid", format, idx, line)

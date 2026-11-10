@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"github.com/metacubex/mihomo/component/preflight"
 	"net"
 	"net/netip"
 	"os"
@@ -186,6 +187,9 @@ func validateDialerProxies(proxies map[string]C.Proxy) error {
 }
 
 func verifyIP6() bool {
+	if preflight.Enabled() {
+		return true
+	}
 	if skip, _ := strconv.ParseBool(os.Getenv("SKIP_SYSTEM_IPV6_CHECK")); skip {
 		return true
 	}

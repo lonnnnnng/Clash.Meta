@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"github.com/metacubex/mihomo/component/preflight"
 	"io"
 	"runtime"
 	"strings"
@@ -174,6 +175,21 @@ var (
 
 func rulesParse(buf []byte, strategy ruleStrategy, format P.RuleFormat) (ruleStrategy, error) {
 	strategy.Reset()
+	if preflight.Enabled() && format == P.YamlRule {
+		// 作者 long：运行下载解析器宽容跳过坏行；导入前本地资源预检必须拒绝语法坏行，不能悄悄丢规则。
+		schema := &RulePayload{}
+		if err := yaml.Unmarshal(buf, schema); err != nil {
+			return nil, err
+		}
+		if schema.Payload == nil && schema.Rules == nil {
+			return nil, ErrNoPayload
+		}
+		values := schema.Payload
+		if len(values) == 0 {
+			values = schema.Rules
+		}
+		return rulesParseInline(values, strategy), nil
+	}
 	if format == P.MrsRule {
 		return rulesMrsParse(buf, strategy)
 	}

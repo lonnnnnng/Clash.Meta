@@ -2,6 +2,7 @@ package http
 
 import (
 	"context"
+	"github.com/metacubex/mihomo/component/preflight"
 	"io"
 	"net"
 	URL "net/url"
@@ -30,6 +31,9 @@ func SetUA(UA string) {
 }
 
 func HttpRequest(ctx context.Context, url, method string, header map[string][]string, body io.Reader, options ...Option) (*http.Response, error) {
+	if preflight.Enabled() {
+		return nil, preflight.ErrNetwork
+	}
 	opt := option{}
 	for _, o := range options {
 		o(&opt)

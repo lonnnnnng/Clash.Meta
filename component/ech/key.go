@@ -7,6 +7,7 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
+	"github.com/metacubex/mihomo/component/preflight"
 	"os"
 	"runtime"
 	"sync"
@@ -124,13 +125,17 @@ func LoadECHKey(key string, tlsConfig *tls.Config) error {
 		loadErr = C.Path.ErrNotSafePath(key)
 	} else {
 		var echKey []byte
-		echKey, loadErr = os.ReadFile(key)
+		echKey, loadErr = preflight.ReadFile(key)
 		if loadErr == nil {
 			echKeys, loadErr = loadECHKey(echKey)
 		}
 	}
 	if loadErr != nil {
 		return fmt.Errorf("parse ECH keys failed, maybe format error:%s, or path error: %s", painTextErr.Error(), loadErr.Error())
+	}
+	if preflight.Enabled() {
+		tlsConfig.GetEncryptedClientHelloKeys = func(*tls.ClientHelloInfo) ([]tls.EncryptedClientHelloKey, error) { return echKeys, nil }
+		return nil
 	}
 	gcFlag := new(os.File) // tiny (on the order of 16 bytes or less) and pointer-free objects may never run the finalizer, so we choose new an os.File
 	updateMutex := sync.RWMutex{}

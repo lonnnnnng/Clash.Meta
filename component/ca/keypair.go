@@ -10,6 +10,7 @@ import (
 	"crypto/x509"
 	"encoding/pem"
 	"fmt"
+	"github.com/metacubex/mihomo/component/preflight"
 	"math/big"
 	"os"
 	"runtime"
@@ -47,10 +48,24 @@ func NewTLSKeyPairLoader(certificate, privateKey string) (func() (*tls.Certifica
 	} else if !C.Path.IsSafePath(privateKey) {
 		loadErr = C.Path.ErrNotSafePath(privateKey)
 	} else {
-		cert, loadErr = tls.LoadX509KeyPair(certificate, privateKey)
+		if preflight.Enabled() {
+			var certBytes, keyBytes []byte
+			certBytes, loadErr = preflight.ReadFile(certificate)
+			if loadErr == nil {
+				keyBytes, loadErr = preflight.ReadFile(privateKey)
+			}
+			if loadErr == nil {
+				cert, loadErr = tls.X509KeyPair(certBytes, keyBytes)
+			}
+		} else {
+			cert, loadErr = tls.LoadX509KeyPair(certificate, privateKey)
+		}
 	}
 	if loadErr != nil {
 		return nil, fmt.Errorf("parse certificate failed, maybe format error:%s, or path error: %s", painTextErr.Error(), loadErr.Error())
+	}
+	if preflight.Enabled() {
+		return func() (*tls.Certificate, error) { return &cert, nil }, nil
 	}
 	gcFlag := new(os.File) // tiny (on the order of 16 bytes or less) and pointer-free objects may never run the finalizer, so we choose new an os.File
 	updateMutex := sync.RWMutex{}
@@ -87,9 +102,13 @@ func LoadCertificates(certificate string) (*x509.CertPool, error) {
 	if !C.Path.IsSafePath(certificate) {
 		loadErr = C.Path.ErrNotSafePath(certificate)
 	} else {
-		certPEMBlock, err := os.ReadFile(certificate)
-		if pool.AppendCertsFromPEM(certPEMBlock) {
-			return pool, nil
+		certPEMBlock, err := preflight.ReadFile(certificate)
+		if err == nil {
+			if pool.AppendCertsFromPEM(certPEMBlock) {
+				return pool, nil
+			}
+			// 作者 long：可读文件不代表存在有效证书，不能把空信任池当作校验成功。
+			err = fmt.Errorf("certificate file contains no valid PEM certificates")
 		}
 		loadErr = err
 	}

@@ -2,6 +2,7 @@ package provider
 
 import (
 	"fmt"
+	"github.com/metacubex/mihomo/component/preflight"
 	"time"
 
 	"github.com/metacubex/mihomo/common/structure"
@@ -47,8 +48,18 @@ func ParseRuleProvider(name string, mapping map[string]any, parse common.ParseRu
 		if !C.Path.IsSafePath(path) {
 			return nil, C.Path.ErrNotSafePath(path)
 		}
+		if preflight.Enabled() {
+			data, readErr := preflight.ReadFile(path)
+			if readErr != nil {
+				return nil, readErr
+			}
+			if _, parseErr := rulesParse(data, newStrategy(behavior, parse), format); parseErr != nil {
+				return nil, parseErr
+			}
+		}
 		vehicle = resource.NewFileVehicle(path)
 	case "http":
+		preflight.DeferExternal()
 		path := C.Path.GetPathByHash("rules", schema.URL)
 		if schema.Path != "" {
 			path = C.Path.Resolve(schema.Path)

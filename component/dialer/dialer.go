@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/metacubex/mihomo/component/preflight"
 	"net"
 	"net/netip"
 	"os"
@@ -38,6 +39,9 @@ func GetTcpConcurrent() bool {
 }
 
 func DialContext(ctx context.Context, network, address string, options ...Option) (net.Conn, error) {
+	if preflight.Enabled() {
+		return nil, preflight.ErrNetwork
+	}
 	opt := applyOptions(options...)
 
 	if opt.network == 4 || opt.network == 6 {
@@ -77,6 +81,9 @@ func DialContext(ctx context.Context, network, address string, options ...Option
 }
 
 func ListenPacket(ctx context.Context, network, address string, rAddrPort netip.AddrPort, options ...Option) (net.PacketConn, error) {
+	if preflight.Enabled() {
+		return nil, preflight.ErrNetwork
+	}
 	opt := applyOptions(options...)
 
 	lc, address, err := listenConfig(network, address, rAddrPort, opt)
@@ -88,6 +95,9 @@ func ListenPacket(ctx context.Context, network, address string, rAddrPort netip.
 
 // Listen creates a TCP listener with the same socket policy as ListenPacket.
 func Listen(ctx context.Context, network, address string, options ...Option) (net.Listener, error) {
+	if preflight.Enabled() {
+		return nil, preflight.ErrNetwork
+	}
 	lc, address, err := listenConfig(network, address, netip.AddrPort{}, applyOptions(options...))
 	if err != nil {
 		return nil, err

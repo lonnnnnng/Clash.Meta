@@ -2,6 +2,7 @@ package provider
 
 import (
 	"errors"
+	"github.com/metacubex/mihomo/component/preflight"
 	"io"
 	"net/netip"
 
@@ -45,6 +46,7 @@ func (i *ipcidrStrategy) Insert(rule string) {
 	//err := i.trie.AddIpCidrForString(rule)
 	err := i.cidrSet.AddIpCidrForString(rule)
 	if err != nil {
+		preflight.Reject("invalid_inline_rule")
 		log.Warnln("invalid Ipcidr:[%s]", rule)
 	} else {
 		i.count++

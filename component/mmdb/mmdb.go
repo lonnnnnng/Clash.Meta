@@ -1,6 +1,7 @@
 package mmdb
 
 import (
+	"github.com/metacubex/mihomo/component/preflight"
 	"sync"
 
 	mihomoOnce "github.com/metacubex/mihomo/common/once"
@@ -93,4 +94,37 @@ func ReloadIP() {
 
 func ReloadASN() {
 	mihomoOnce.Reset(&asnOnce)
+}
+
+// 作者 long：预检的坏Geo数据必须返回错误，不Fatal退出或访问磁盘；只允许一次性隔离解析上下文调用。
+func LoadValidationBytes(buffer []byte, asn bool) error {
+	if !preflight.Enabled() {
+		return preflight.ErrReadOnly
+	}
+	reader, err := maxminddb.FromBytes(buffer)
+	if err != nil {
+		return err
+	}
+	if asn {
+		asnOnce.Do(func() { asnReader = ASNReader{Reader: reader} })
+		if asnReader.Reader != reader {
+			reader.Close()
+		}
+		return nil
+	}
+	ipOnce.Do(func() {
+		ipReader = IPReader{Reader: reader}
+		switch reader.Metadata.DatabaseType {
+		case "sing-geoip":
+			ipReader.databaseType = typeSing
+		case "Meta-geoip0":
+			ipReader.databaseType = typeMetaV0
+		default:
+			ipReader.databaseType = typeMaxmind
+		}
+	})
+	if ipReader.Reader != reader {
+		reader.Close()
+	}
+	return nil
 }

@@ -5,8 +5,8 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
+	"github.com/metacubex/mihomo/component/preflight"
 	"net"
-	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -131,7 +131,7 @@ func NewSsh(option SshOption) (*Ssh, error) {
 			if !C.Path.IsSafePath(path) {
 				return nil, C.Path.ErrNotSafePath(path)
 			}
-			b, err = os.ReadFile(path)
+			b, err = preflight.ReadFile(path)
 			if err != nil {
 				return nil, err
 			}

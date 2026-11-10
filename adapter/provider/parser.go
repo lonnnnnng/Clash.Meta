@@ -3,6 +3,7 @@ package provider
 import (
 	"errors"
 	"fmt"
+	"github.com/metacubex/mihomo/component/preflight"
 	"time"
 
 	"github.com/metacubex/mihomo/common/structure"
@@ -82,8 +83,19 @@ func ParseProxyProvider(name string, mapping map[string]any, tunnel C.Tunnel) (P
 		if !C.Path.IsSafePath(path) {
 			return nil, C.Path.ErrNotSafePath(path)
 		}
+		if preflight.Enabled() {
+			// 作者 long：file Provider在导入前按同一过滤/override/解密解析器验证字节，不调用会写缓存的Initial。
+			data, readErr := preflight.ReadFile(path)
+			if readErr != nil {
+				return nil, readErr
+			}
+			if _, parseErr := parser(data); parseErr != nil {
+				return nil, parseErr
+			}
+		}
 		vehicle = resource.NewFileVehicle(path)
 	case "http":
+		preflight.DeferExternal()
 		path := C.Path.GetPathByHash("proxies", schema.URL)
 		if schema.Path != "" {
 			path = C.Path.Resolve(schema.Path)

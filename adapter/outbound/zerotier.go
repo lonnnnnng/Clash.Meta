@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
+	"github.com/metacubex/mihomo/component/preflight"
 	"io/fs"
 	"net"
 	"net/netip"
@@ -228,7 +229,7 @@ func NewZeroTier(option ZeroTierOption) (*ZeroTier, error) {
 		if !C.Path.IsSafePath(option.Planet) {
 			return nil, C.Path.ErrNotSafePath(option.Planet)
 		}
-		data, readErr := os.ReadFile(option.Planet)
+		data, readErr := preflight.ReadFile(option.Planet)
 		if readErr != nil {
 			return nil, fmt.Errorf("read ZeroTier planet: %w", readErr)
 		}

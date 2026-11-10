@@ -2,6 +2,7 @@ package fakeip
 
 import (
 	"errors"
+	"github.com/metacubex/mihomo/component/preflight"
 	"net/netip"
 	"strings"
 	"sync"
@@ -187,7 +188,8 @@ func New(options Options) (*Pool, error) {
 		cycle:   false,
 		ipnet:   options.IPNet,
 	}
-	if options.Persistence {
+	// 作者 long：预检检查同一地址池范围，但不打开/删除用户cache.db，存储后端仅此进程使用内存。
+	if options.Persistence && !preflight.Enabled() {
 		pool.store = newCachefileStore(cachefile.Cache(), options.IPNet)
 	} else {
 		pool.store = newMemoryStore(options.Size)

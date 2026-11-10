@@ -2,6 +2,7 @@ package log
 
 import (
 	"fmt"
+	"github.com/metacubex/mihomo/component/preflight"
 	"os"
 
 	"github.com/metacubex/mihomo/common/observable"
@@ -59,6 +60,9 @@ func Debugln(format string, v ...any) {
 }
 
 func Fatalln(format string, v ...any) {
+	if preflight.Enabled() {
+		panic(preflight.ErrReadOnly)
+	}
 	log.Fatalf(format, v...)
 }
 
@@ -97,6 +101,9 @@ func print(data Event) {
 }
 
 func newLog(logLevel LogLevel, format string, v ...any) Event {
+	if preflight.Enabled() {
+		return Event{LogLevel: logLevel, Payload: "isolated configuration validation"}
+	}
 	return Event{
 		LogLevel: logLevel,
 		Payload:  fmt.Sprintf(format, v...),

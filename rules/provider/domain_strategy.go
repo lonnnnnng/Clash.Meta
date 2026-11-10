@@ -2,6 +2,7 @@ package provider
 
 import (
 	"errors"
+	"github.com/metacubex/mihomo/component/preflight"
 	"io"
 	"strings"
 
@@ -39,11 +40,13 @@ func (d *domainStrategy) Reset() {
 
 func (d *domainStrategy) Insert(rule string) {
 	if strings.ContainsRune(rule, '/') {
+		preflight.Reject("invalid_inline_rule")
 		log.Warnln("skip invalid domain from rule provider: invalid domain %q: slash is not allowed", rule)
 		return
 	}
 	err := d.domainSetBuilder.Insert(rule)
 	if err != nil {
+		preflight.Reject("invalid_inline_rule")
 		log.Warnln("skip invalid domain from rule provider: %s", err)
 	} else {
 		d.count++

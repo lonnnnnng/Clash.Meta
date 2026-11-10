@@ -2,6 +2,7 @@ package provider
 
 import (
 	"fmt"
+	"github.com/metacubex/mihomo/component/preflight"
 
 	C "github.com/metacubex/mihomo/constant"
 	P "github.com/metacubex/mihomo/constant/provider"
@@ -41,6 +42,7 @@ func (c *classicalStrategy) Reset() {
 func (c *classicalStrategy) Insert(rule string) {
 	r, err := c.payloadToRule(rule)
 	if err != nil {
+		preflight.Reject("invalid_inline_rule")
 		log.Warnln("parse classical rule [%s] error: %s", rule, err.Error())
 	} else {
 		c.rules = append(c.rules, r)

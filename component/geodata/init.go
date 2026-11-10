@@ -3,6 +3,7 @@ package geodata
 import (
 	"context"
 	"fmt"
+	"github.com/metacubex/mihomo/component/preflight"
 	"io"
 	"os"
 	"sync"
@@ -88,6 +89,12 @@ func downloadToPath(url string, path string) (err error) {
 }
 
 func InitGeoSite() error {
+	if preflight.Enabled() {
+		if err := Verify(C.GeositeName); err != nil {
+			return preflight.Reject("resource_invalid")
+		}
+		return nil
+	}
 	geoSiteEnable.Store(true)
 	initGeoSiteMutex.Lock()
 	defer initGeoSiteMutex.Unlock()
@@ -115,6 +122,22 @@ func InitGeoSite() error {
 }
 
 func InitGeoIP() error {
+	if preflight.Enabled() {
+		if GeodataMode() {
+			if err := Verify(C.GeoipName); err != nil {
+				return preflight.Reject("resource_invalid")
+			}
+			return nil
+		}
+		b, err := preflight.Resource("GEOIP.metadb")
+		if err != nil {
+			return err
+		}
+		if err := mmdb.LoadValidationBytes(b, false); err != nil {
+			return preflight.Reject("resource_invalid")
+		}
+		return nil
+	}
 	geoIpEnable.Store(true)
 	initGeoIPMutex.Lock()
 	defer initGeoIPMutex.Unlock()
@@ -166,6 +189,16 @@ func InitGeoIP() error {
 }
 
 func InitASN() error {
+	if preflight.Enabled() {
+		b, err := preflight.Resource("ASN.mmdb")
+		if err != nil {
+			return err
+		}
+		if err := mmdb.LoadValidationBytes(b, true); err != nil {
+			return preflight.Reject("resource_invalid")
+		}
+		return nil
+	}
 	asnEnable.Store(true)
 	initASNMutex.Lock()
 	defer initASNMutex.Unlock()

@@ -38,11 +38,34 @@ func GetTcpConcurrent() bool {
 	return tcpConcurrent.Load()
 }
 
-func DialContext(ctx context.Context, network, address string, options ...Option) (net.Conn, error) {
+func DialContext(ctx context.Context, network, address string, options ...Option) (connection net.Conn, err error) {
 	if preflight.Enabled() {
 		return nil, preflight.ErrNetwork
 	}
 	opt := applyOptions(options...)
+	if sourcePort, observer := lookupDiagnosticFor(ctx); observer != nil {
+		started := time.Now()
+		defer func() {
+			if err != nil || connection == nil {
+				return
+			}
+			family, endpoint := "unknown", ""
+			remote := connection.RemoteAddr()
+			if remote != nil {
+				endpoint = remote.String()
+			}
+			if addr, ok := remote.(*net.TCPAddr); ok && addr != nil {
+				if addr.IP.To4() != nil {
+					family = "ipv4"
+				} else if addr.IP.To16() != nil {
+					family = "ipv6"
+				}
+			}
+			// 作者 long：并发连接可能多个connect成功，只有最终返回者是本次拨号选中的端点；候选成功不能冒充赢家。
+			observer.observe(LookupDiagnostic{Kind: "node-selected", SourcePort: sourcePort, Network: network,
+				DialEndpoint: endpoint, DialFamily: family, Duration: time.Since(started), ContextErr: ctx.Err()})
+		}()
+	}
 
 	if opt.network == 4 || opt.network == 6 {
 		if strings.Contains(network, "tcp") {
@@ -147,10 +170,22 @@ func listenConfig(network, address string, rAddrPort netip.AddrPort, opt option)
 	return lc, address, nil
 }
 
-func dialContext(ctx context.Context, network string, destination netip.Addr, port string, opt option) (net.Conn, error) {
+func dialContext(ctx context.Context, network string, destination netip.Addr, port string, opt option) (connection net.Conn, err error) {
 	var address string
 	destination, port = resolver.LookupIP4P(destination, port)
 	address = net.JoinHostPort(destination.String(), port)
+	if sourcePort, observer := lookupDiagnosticFor(ctx); observer != nil {
+		started := time.Now()
+		family := "ipv6"
+		if destination.Is4() || destination.Is4In6() {
+			family = "ipv4"
+		}
+		defer func() {
+			// 作者 long：只观察原始拨号返回，不包装连接或改变读写接口；成功仅代表本机connect完成，不代表远端协议接受。
+			observer.observe(LookupDiagnostic{Kind: "node-dial", SourcePort: sourcePort, Network: network,
+				DialEndpoint: address, DialFamily: family, Duration: time.Since(started), Err: err, ContextErr: ctx.Err()})
+		}()
+	}
 
 	netDialer := opt.netDialer
 	switch netDialer.(type) {

@@ -10,12 +10,14 @@ type lookupDiagnosticSource struct{}
 
 // LookupDiagnostic只在显式源端口采集期间交给宿主；地址和错误原值必须由宿主立即分类/摘要，不得直接持久化。作者 long。
 type LookupDiagnostic struct {
+	Kind                                    string
 	SourcePort                              int
 	Host, Network, ResolverRole             string
 	IPv6Disabled                            bool
 	Addresses, IPv4Addresses, IPv6Addresses int
 	Duration                                time.Duration
 	Err, ContextErr                         error
+	DialEndpoint, DialFamily                string
 }
 
 type lookupObserver struct {

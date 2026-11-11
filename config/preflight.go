@@ -84,11 +84,6 @@ func ParseReadOnly(buf []byte, resourceLoader func(string) ([]byte, error)) (res
 		if err = validatePreflightTLS(value("certificate"), value("private-key"), value("client-auth-cert"), value("ech-key")); err != nil {
 			return
 		}
-		if inbound := cfg.Listeners[value("name")]; inbound != nil {
-			if err = IN.ValidateReadOnly(inbound); err != nil {
-				return
-			}
-		}
 	}
 	if raw.Tun.Enable {
 		preflight.Location("tun", -1)

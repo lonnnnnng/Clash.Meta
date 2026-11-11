@@ -234,34 +234,11 @@ func relayToFallback(wrapper net.Conn, rawConn net.Conn, fallback net.Conn) {
 	N.Relay(rawConn, fallback)
 }
 
-func New(config LC.SudokuServer, lc C.InboundListenConfig, tunnel C.Tunnel, additions ...inbound.Addition) (*Listener, error) {
-	if len(additions) == 0 {
-		additions = []inbound.Addition{
-			inbound.WithInName("DEFAULT-SUDOKU"),
-			inbound.WithSpecialRules(""),
-		}
-	}
-
-	// Using sing handler for sing-mux support
-	h, err := sing.NewListenerHandler(sing.ListenerConfig{
-		Tunnel:    tunnel,
-		Type:      C.SUDOKU,
-		Additions: additions,
-		MuxOption: config.MuxOption,
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	l, err := lc.Listen(context.Background(), "tcp", config.Listen)
-	if err != nil {
-		return nil, err
-	}
-
+// PrepareProtocol只准备协议表和参数，不申请监听；预检与正式服务共用，防止错误拖到首个连接才暴露。作者 long。
+func PrepareProtocol(config LC.SudokuServer) (sudoku.ProtocolConfig, error) {
 	tableType, err := sudoku.NormalizeTableType(config.TableType)
 	if err != nil {
-		_ = l.Close()
-		return nil, err
+		return sudoku.ProtocolConfig{}, err
 	}
 
 	defaultConf := sudoku.DefaultConfig()
@@ -270,8 +247,7 @@ func New(config LC.SudokuServer, lc C.InboundListenConfig, tunnel C.Tunnel, addi
 
 	tables, err := sudoku.NewServerTablesWithCustomPatterns(sudoku.ServerAEADSeed(config.Key), tableType, config.CustomTable, config.CustomTables)
 	if err != nil {
-		_ = l.Close()
-		return nil, err
+		return sudoku.ProtocolConfig{}, err
 	}
 
 	handshakeTimeout := sudoku.DerefInt(config.HandshakeTimeoutSecond, defaultConf.HandshakeTimeoutSeconds)
@@ -294,6 +270,41 @@ func New(config LC.SudokuServer, lc C.InboundListenConfig, tunnel C.Tunnel, addi
 	}
 	if config.AEADMethod != "" {
 		protoConf.AEADMethod = config.AEADMethod
+	}
+
+	if err := protoConf.Validate(); err != nil {
+		return sudoku.ProtocolConfig{}, err
+	}
+	return protoConf, nil
+}
+
+func New(config LC.SudokuServer, lc C.InboundListenConfig, tunnel C.Tunnel, additions ...inbound.Addition) (*Listener, error) {
+	if len(additions) == 0 {
+		additions = []inbound.Addition{
+			inbound.WithInName("DEFAULT-SUDOKU"),
+			inbound.WithSpecialRules(""),
+		}
+	}
+
+	// Using sing handler for sing-mux support
+	h, err := sing.NewListenerHandler(sing.ListenerConfig{
+		Tunnel:    tunnel,
+		Type:      C.SUDOKU,
+		Additions: additions,
+		MuxOption: config.MuxOption,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	protoConf, err := PrepareProtocol(config)
+	if err != nil {
+		return nil, err
+	}
+
+	l, err := lc.Listen(context.Background(), "tcp", config.Listen)
+	if err != nil {
+		return nil, err
 	}
 
 	sl := &Listener{

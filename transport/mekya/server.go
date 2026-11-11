@@ -25,6 +25,9 @@ type Listener struct {
 }
 
 func Listen(ctx context.Context, ln net.Listener, cfg Config) (*Listener, error) {
+	if err := cfg.Validate(); err != nil {
+		return nil, err
+	}
 	packetConn := newWrappedPacketConn(ctx, ln.Addr())
 	handler := newServer(ctx, cfg, packetConn)
 	mkcpListener, err := mkcp.Listen(ctx, packetConn, cfg.KCP)

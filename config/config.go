@@ -34,6 +34,7 @@ import (
 	"github.com/metacubex/mihomo/dns"
 	"github.com/metacubex/mihomo/listener"
 	LC "github.com/metacubex/mihomo/listener/config"
+	IN "github.com/metacubex/mihomo/listener/inbound"
 	"github.com/metacubex/mihomo/log"
 	R "github.com/metacubex/mihomo/rules"
 	RB "github.com/metacubex/mihomo/rules/bundle"
@@ -1039,6 +1040,12 @@ func parseListeners(cfg *RawConfig) (listeners map[string]C.InboundListener, err
 		inboundListener, err := listener.ParseListener(mapping)
 		if err != nil {
 			return nil, fmt.Errorf("listener %d: %w", index, err)
+		}
+		// 作者 long：使用已解码对象检查，数值名称也遵循弱类型转换，不能因用原始map查错名称而跳过协议语义。
+		if preflight.Enabled() {
+			if err := IN.ValidateReadOnly(inboundListener); err != nil {
+				return nil, err
+			}
 		}
 
 		name := inboundListener.Name()

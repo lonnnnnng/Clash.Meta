@@ -563,6 +563,9 @@ func NewVmess(option VmessOption) (*Vmess, error) {
 		return nil, fmt.Errorf("%s requires TLS", securityMode)
 	}
 	if option.Network == "mkcp" || option.Network == "kcp" {
+		if err := option.MKCPOpts.Build().Validate(); err != nil {
+			return nil, err
+		}
 		switch securityMode {
 		case "ShadowTLS", "Restls", "JLS":
 			return nil, fmt.Errorf("%s only supports TCP transports", securityMode)

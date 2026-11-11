@@ -75,6 +75,9 @@ type ackItem struct {
 }
 
 func Dial(ctx context.Context, raw net.Conn, cfg Config) (*Conn, error) {
+	if err := cfg.Validate(); err != nil {
+		return nil, err
+	}
 	security, err := cfg.security()
 	if err != nil {
 		return nil, err

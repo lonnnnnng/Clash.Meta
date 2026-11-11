@@ -34,6 +34,9 @@ type packetPayload struct {
 }
 
 func Listen(ctx context.Context, pc net.PacketConn, cfg Config) (*Listener, error) {
+	if err := cfg.Validate(); err != nil {
+		return nil, err
+	}
 	security, err := cfg.security()
 	if err != nil {
 		return nil, err

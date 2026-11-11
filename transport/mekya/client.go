@@ -35,6 +35,9 @@ type Client struct {
 }
 
 func NewClient(ctx context.Context, dial DialFunc, cfg Config) (*Client, error) {
+	if err := cfg.Validate(); err != nil {
+		return nil, err
+	}
 	ctx, cancel := context.WithCancel(ctx)
 	roundTripURL, err := normalizeURL(cfg.URL)
 	if err != nil {

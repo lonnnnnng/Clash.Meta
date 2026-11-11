@@ -4,6 +4,7 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/sha256"
+	"errors"
 )
 
 type Config struct {
@@ -16,6 +17,15 @@ type Config struct {
 	ReadBuffer       uint32
 	Seed             string
 	Header           string
+}
+
+// 作者 long：飞行窗口用1000/TTI作除数；超过一秒会整除为零，须在创建监听或会话前拒绝以免网络输入触发panic。
+func (c Config) Validate() error {
+	if c.tti() > 1000 {
+		return errors.New("mkcp: tti exceeds one second")
+	}
+	_, err := c.security()
+	return err
 }
 
 func (c Config) mtu() uint32 {

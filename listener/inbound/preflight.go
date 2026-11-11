@@ -5,17 +5,25 @@ import (
 	"errors"
 	"net"
 
+	"github.com/metacubex/mihomo/component/ca"
 	"github.com/metacubex/mihomo/component/preflight"
 	C "github.com/metacubex/mihomo/constant"
 	"github.com/metacubex/mihomo/listener/anytls"
 	LC "github.com/metacubex/mihomo/listener/config"
+	"github.com/metacubex/mihomo/listener/hysteria2_realm"
+	"github.com/metacubex/mihomo/listener/shadowquic"
 	"github.com/metacubex/mihomo/listener/sing_hysteria2"
 	"github.com/metacubex/mihomo/listener/sing_shadowsocks"
 	"github.com/metacubex/mihomo/listener/sing_tun"
 	"github.com/metacubex/mihomo/listener/sing_vless"
 	"github.com/metacubex/mihomo/listener/sing_vmess"
+	"github.com/metacubex/mihomo/listener/snell"
+	"github.com/metacubex/mihomo/listener/sudoku"
 	"github.com/metacubex/mihomo/listener/trojan"
+	"github.com/metacubex/mihomo/listener/trusttunnel"
 	"github.com/metacubex/mihomo/listener/tuic"
+	"github.com/metacubex/mihomo/transport/socks5"
+	"github.com/metacubex/tls"
 )
 
 var errPreflightBind = errors.New("preflight reached bind boundary")
@@ -59,6 +67,16 @@ func ValidateReadOnly(listener C.InboundListener) error {
 			return errors.New("VLESS requires security mode")
 		}
 	case *Vmess:
+		if v.vs.MKCPConfig.Enable {
+			if err = v.vs.MKCPConfig.Build().Validate(); err != nil {
+				return err
+			}
+		}
+		if v.vs.MekyaConfig.Enable {
+			if err = v.vs.MekyaConfig.Build().Validate(); err != nil {
+				return err
+			}
+		}
 		_, err = sing_vmess.New(v.vs, lc, nil, v.Additions()...)
 	case *Trojan:
 		_, err = trojan.New(v.vs, lc, nil, v.Additions()...)
@@ -71,8 +89,53 @@ func ValidateReadOnly(listener C.InboundListener) error {
 		_, err = tuic.New(v.ts, lc, nil, v.Additions()...)
 	case *Hysteria2:
 		_, err = sing_hysteria2.New(v.ts, lc, nil, v.Additions()...)
+	case *Snell:
+		_, err = snell.New(v.snell, lc, nil, v.Additions()...)
+	case *ShadowQuic:
+		_, err = shadowquic.New(v.ss, lc, nil, v.Additions()...)
+	case *TrustTunnel:
+		_, err = trusttunnel.New(v.vs, lc, nil, v.Additions()...)
+	case *Hysteria2RealmServer:
+		_, err = hysteria2_realm.New(v.ts, lc, nil, v.Additions()...)
+	case *Sudoku:
+		_, err = sudoku.PrepareProtocol(v.serverConf)
+	case *HTTP:
+		return validateAuthReality(v.config.Certificate, v.config.PrivateKey, v.config.ClientAuthType, v.config.ClientAuthCert, v.config.RealityConfig)
+	case *Socks:
+		return validateAuthReality(v.config.Certificate, v.config.PrivateKey, v.config.ClientAuthType, v.config.ClientAuthCert, v.config.RealityConfig)
+	case *Mixed:
+		return validateAuthReality(v.config.Certificate, v.config.PrivateKey, v.config.ClientAuthType, v.config.ClientAuthCert, v.config.RealityConfig)
+	case *Tunnel:
+		// 作者 long：真实TCP/UDP构造器在绑定之后解析target；这里复用地址解析而不打开监听端口。
+		for _, network := range v.config.Network {
+			if (network == "tcp" || network == "udp") && socks5.ParseAddr(v.config.Target) == nil {
+				return errors.New("invalid tunnel target")
+			}
+		}
+	case *Mieru, *Redir, *TProxy:
+		// 作者 long：Mieru的Store已执行参数验证，Redir/TProxy后续仅设置平台套接字；权限/接口属于运行环境。
+	default:
+		return errors.New("unhandled validation listener")
 	}
 	return preflightBindResult(err)
+}
+
+func validateAuthReality(certificate, key, authType, clientCert string, reality RealityConfig) error {
+	if reality.PrivateKey == "" {
+		return nil
+	}
+	if certificate != "" && key != "" {
+		return errors.New("certificate is unavailable in reality")
+	}
+	auth := ca.ClientAuthTypeFromString(authType)
+	if clientCert != "" && auth == tls.NoClientCert {
+		auth = tls.RequireAndVerifyClientCert
+	}
+	if auth != tls.NoClientCert {
+		return errors.New("client-auth is unavailable in reality")
+	}
+	_, err := reality.Build().Build(nil)
+	return err
 }
 
 func ValidateTuicReadOnly(config LC.TuicServer) error {

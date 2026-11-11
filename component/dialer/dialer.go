@@ -387,18 +387,35 @@ type dialResult struct {
 	isPrimary bool
 }
 
-func parseAddr(ctx context.Context, network, address string, preferResolver resolver.Resolver) ([]netip.Addr, string, error) {
+func parseAddr(ctx context.Context, network, address string, preferResolver resolver.Resolver) (ips []netip.Addr, port string, err error) {
 	host, port, err := net.SplitHostPort(address)
 	if err != nil {
 		return nil, "-1", err
 	}
 
+	role := "custom"
 	if preferResolver == nil {
+		role = "proxy"
 		preferResolver = resolver.ProxyServerHostResolver
 		ctx = resolver.WithInitiator(ctx, resolver.InitiatorProxy)
 	}
 
-	var ips []netip.Addr
+	if sourcePort, observer := lookupDiagnosticFor(ctx); observer != nil {
+		started := time.Now()
+		ipv6Disabled := resolver.DisableIPv6
+		defer func() {
+			record := LookupDiagnostic{SourcePort: sourcePort, Host: host, Network: network, ResolverRole: role,
+				IPv6Disabled: ipv6Disabled, Addresses: len(ips), Duration: time.Since(started), Err: err, ContextErr: ctx.Err()}
+			for _, ip := range ips {
+				if ip.Is4() || ip.Is4In6() {
+					record.IPv4Addresses++
+				} else if ip.Is6() {
+					record.IPv6Addresses++
+				}
+			}
+			observer.observe(record)
+		}()
+	}
 	switch network {
 	case "tcp4", "udp4":
 		ips, err = resolver.LookupIPv4WithResolver(ctx, host, preferResolver)

@@ -15,6 +15,7 @@ import (
 	"github.com/metacubex/mihomo/common/atomic"
 	N "github.com/metacubex/mihomo/common/net"
 	"github.com/metacubex/mihomo/common/utils"
+	"github.com/metacubex/mihomo/component/dialer"
 	"github.com/metacubex/mihomo/component/loopback"
 	"github.com/metacubex/mihomo/component/nat"
 	"github.com/metacubex/mihomo/component/process"
@@ -574,6 +575,7 @@ func handleTCPConn(connCtx C.ConnContext) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), C.DefaultTCPTimeout)
 	defer cancel()
+	ctx = dialer.WithLookupDiagnosticSource(ctx, int(metadata.SrcPort))
 	remoteConn, err := retry(ctx, func(ctx context.Context) (remoteConn C.Conn, err error) {
 		remoteConn, err = proxy.DialContext(ctx, dialMetadata)
 		if err != nil {

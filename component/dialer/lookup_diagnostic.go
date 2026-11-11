@@ -1,0 +1,52 @@
+package dialer
+
+import (
+	"context"
+	"sync/atomic"
+	"time"
+)
+
+type lookupDiagnosticSource struct{}
+
+// LookupDiagnostic只在显式源端口采集期间交给宿主；地址和错误原值必须由宿主立即分类/摘要，不得直接持久化。作者 long。
+type LookupDiagnostic struct {
+	SourcePort                              int
+	Host, Network, ResolverRole             string
+	IPv6Disabled                            bool
+	Addresses, IPv4Addresses, IPv6Addresses int
+	Duration                                time.Duration
+	Err, ContextErr                         error
+}
+
+type lookupObserver struct {
+	enabled func(int) bool
+	observe func(LookupDiagnostic)
+}
+
+var activeLookupObserver atomic.Pointer[lookupObserver]
+
+func SetLookupDiagnosticObserver(enabled func(int) bool, observe func(LookupDiagnostic)) {
+	if enabled == nil || observe == nil {
+		activeLookupObserver.Store(nil)
+		return
+	}
+	activeLookupObserver.Store(&lookupObserver{enabled, observe})
+}
+
+// WithLookupDiagnosticSource沿原拨号context传递源端口，不延长预算、不新增请求；后台共享DNS任务不会冒充本次调用。作者 long。
+func WithLookupDiagnosticSource(ctx context.Context, port int) context.Context {
+	observer := activeLookupObserver.Load()
+	if observer == nil || port <= 0 || port > 65535 || !observer.enabled(port) {
+		return ctx
+	}
+	return context.WithValue(ctx, lookupDiagnosticSource{}, port)
+}
+
+func lookupDiagnosticFor(ctx context.Context) (int, *lookupObserver) {
+	port, _ := ctx.Value(lookupDiagnosticSource{}).(int)
+	observer := activeLookupObserver.Load()
+	if observer == nil || !observer.enabled(port) {
+		return 0, nil
+	}
+	return port, observer
+}

@@ -101,7 +101,10 @@ func (r *Resolver) LookupIP(ctx context.Context, host string) (ips []netip.Addr,
 		}
 		ips = append(ips, ipv6s...)
 	case <-waitIPv6.C:
-		// wait ipv6 result
+		// 作者 long：A已失败且IPv6还未完成时不能报告空地址成功；保留原错误链，避免拨号层把DNS失败误当无IP。
+		if len(ips) == 0 && err != nil {
+			return nil, err
+		}
 	}
 
 	return ips, nil

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"net"
+	"time"
 
 	"github.com/metacubex/mihomo/common/buf"
 	N "github.com/metacubex/mihomo/common/net"
@@ -21,6 +22,7 @@ type Conn struct {
 	addons   *Addons
 	received bool
 	sent     bool
+	observer func(HandshakeDiagnostic)
 }
 
 func (vc *Conn) Read(b []byte) (int, error) {
@@ -116,13 +118,31 @@ func (vc *Conn) sendRequest(p []byte) (err error) {
 
 	buf.Must(buf.Error(buffer.Write(p)))
 
-	_, err = vc.ExtendedConn.Write(buffer.Bytes())
+	var written int
+	if vc.observer != nil {
+		started := time.Now()
+		vc.observer(HandshakeDiagnostic{Stage: "vless-request", State: "begin", PayloadBytes: len(p), ExpectedBytes: requestLen})
+		defer func() {
+			vc.observer(HandshakeDiagnostic{Stage: "vless-request", State: "end", Duration: time.Since(started),
+				PayloadBytes: len(p), StreamBytes: written, ExpectedBytes: requestLen, Err: err})
+		}()
+	}
+	written, err = vc.ExtendedConn.Write(buffer.Bytes())
 	return
 }
 
 func (vc *Conn) recvResponse() (err error) {
+	read, expected := 0, 2
+	if vc.observer != nil {
+		started := time.Now()
+		vc.observer(HandshakeDiagnostic{Stage: "vless-response", State: "begin", ExpectedBytes: expected})
+		defer func() {
+			vc.observer(HandshakeDiagnostic{Stage: "vless-response", State: "end", Duration: time.Since(started),
+				StreamBytes: read, ExpectedBytes: expected, Err: err})
+		}()
+	}
 	var buffer [2]byte
-	_, err = io.ReadFull(vc.ExtendedConn, buffer[:])
+	read, err = io.ReadFull(vc.ExtendedConn, buffer[:])
 	if err != nil {
 		return err
 	}
@@ -132,8 +152,15 @@ func (vc *Conn) recvResponse() (err error) {
 	}
 
 	length := int64(buffer[1])
+	expected += int(length)
 	if length != 0 { // addon data length > 0
-		io.CopyN(io.Discard, vc.ExtendedConn, length) // just discard
+		if vc.observer != nil {
+			vc.observer(HandshakeDiagnostic{Stage: "vless-response-addon", State: "begin", StreamBytes: read, ExpectedBytes: expected})
+		}
+		// 作者 long：声明的附加头未收齐时保留原读取错误，不能把截断头当作完整响应而释放读取握手状态。
+		var count int64
+		count, err = io.CopyN(io.Discard, vc.ExtendedConn, length)
+		read += int(count)
 	}
 
 	return

@@ -14,6 +14,7 @@ import (
 	N "github.com/metacubex/mihomo/common/net"
 	"github.com/metacubex/mihomo/common/utils"
 	"github.com/metacubex/mihomo/component/ca"
+	"github.com/metacubex/mihomo/component/dialer"
 	"github.com/metacubex/mihomo/component/ech"
 	tlsC "github.com/metacubex/mihomo/component/tls"
 	C "github.com/metacubex/mihomo/constant"
@@ -222,7 +223,15 @@ func (v *Vless) StreamConnContext(ctx context.Context, c net.Conn, metadata *C.M
 				convert.SetUserAgent(wsOpts.Headers)
 			}
 		}
-		c, err = vmess.StreamWebsocketConn(ctx, c, wsOpts)
+		if observe := dialer.NewProtocolDiagnosticObserver(ctx); observe != nil {
+			started := time.Now()
+			observe("vless-ws-stream", "begin", 0, 0, 0, 0, nil)
+			c, err = vmess.StreamWebsocketConn(ctx, c, wsOpts)
+			// 作者 long：这里只证明原Stream调用返回；early-data/fast-open可延迟升级，不能通称收到HTTP101。
+			observe("vless-ws-stream", "end", time.Since(started), 0, 0, 0, err)
+		} else {
+			c, err = vmess.StreamWebsocketConn(ctx, c, wsOpts)
+		}
 	case "http":
 		// readability first, so just copy default TLS logic
 		c, err = v.streamTLSConn(ctx, c, false)
@@ -299,6 +308,14 @@ func (v *Vless) streamConnContext(ctx context.Context, c net.Conn, metadata *C.M
 	}
 	if err != nil {
 		conn = nil
+	} else if metadata.NetWork == C.TCP {
+		if plain, ok := conn.(*vless.Conn); ok {
+			if observe := dialer.NewProtocolDiagnosticObserver(ctx); observe != nil {
+				plain.SetHandshakeObserver(func(value vless.HandshakeDiagnostic) {
+					observe(value.Stage, value.State, value.Duration, value.PayloadBytes, value.StreamBytes, value.ExpectedBytes, value.Err)
+				})
+			}
+		}
 	}
 	return
 }

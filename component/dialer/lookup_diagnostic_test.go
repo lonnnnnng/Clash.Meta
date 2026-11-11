@@ -3,6 +3,7 @@ package dialer
 import (
 	"context"
 	"errors"
+	"io"
 	"net"
 	"net/netip"
 	"testing"
@@ -93,5 +94,31 @@ func TestPublicDialReportsSelectedOriginalConnectionWithoutRequiringRemoteAddres
 		} else if winner.DialEndpoint != remote.String() || winner.DialFamily != "ipv4" {
 			t.Fatal("candidate address substituted for winner")
 		}
+	}
+}
+
+// 作者 long：拨号结束后context取消并不等于隧道IO失败；协议回执只沿身份关联，停采后旧回调必须失效。
+func TestProtocolObserverRetainsIdentityWithoutClaimingDialContextAsIOFailure(t *testing.T) {
+	prior := activeLookupObserver.Load()
+	defer activeLookupObserver.Store(prior)
+	var records []LookupDiagnostic
+	SetLookupDiagnosticObserver(func(port int) bool { return port == 43210 }, func(record LookupDiagnostic) { records = append(records, record) })
+	if NewProtocolDiagnosticObserver(context.Background()) != nil {
+		t.Fatal("unscoped observer enabled")
+	}
+	ctx, cancel := context.WithCancel(WithLookupDiagnosticSource(context.Background(), 43210))
+	observe := NewProtocolDiagnosticObserver(ctx)
+	if observe == nil {
+		t.Fatal("missing observer")
+	}
+	cancel()
+	observe("vless-response", "begin", 0, 0, 0, 2, nil)
+	if len(records) != 1 || records[0].SourcePort != 43210 || records[0].Kind != "protocol" || records[0].ContextErr != nil {
+		t.Fatal("IO context misclassified")
+	}
+	SetLookupDiagnosticObserver(nil, nil)
+	observe("vless-response", "end", 0, 0, 0, 2, io.EOF)
+	if len(records) != 1 {
+		t.Fatal("old observer continued after stop")
 	}
 }

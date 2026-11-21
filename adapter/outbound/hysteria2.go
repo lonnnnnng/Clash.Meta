@@ -111,6 +111,13 @@ func (h *Hysteria2) ListenPacketContext(ctx context.Context, metadata *C.Metadat
 	return NewPacketConn(N.NewThreadSafePacketConn(pc), h), nil
 }
 
+// 作者 long：Hysteria2 的流共享同一个 QUIC 客户端；底层网络切换后关闭旧连接，让下一次拨号建立新连接。
+func (h *Hysteria2) ResetNetwork() {
+	if h.client != nil {
+		_ = h.client.CloseWithError(errors.New("network changed"))
+	}
+}
+
 // Close implements C.ProxyAdapter
 func (h *Hysteria2) Close() error {
 	if h.client != nil {

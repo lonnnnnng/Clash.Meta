@@ -69,6 +69,11 @@ type TuicOption struct {
 	UDPOverStreamVersion int  `proxy:"udp-over-stream-version,omitempty"`
 }
 
+// 作者 long：TUIC 的 TCP/UDP 共享池保留旧网络的 QUIC 连接；切网时淘汰两类池，后续请求再建客户端。
+func (t *Tuic) ResetNetwork() {
+	t.client.ResetNetwork()
+}
+
 // DialContext implements C.ProxyAdapter
 func (t *Tuic) DialContext(ctx context.Context, metadata *C.Metadata) (C.Conn, error) {
 	conn, err := t.client.DialContext(ctx, metadata)

@@ -45,6 +45,7 @@ const (
 type wireguardGoDevice interface {
 	Close()
 	IpcSet(uapiConf string) error
+	BindUpdate() error
 }
 
 type WireGuard struct {
@@ -812,6 +813,19 @@ func (w *WireGuard) Close() error {
 		wgDevice.Close()
 	}
 	return nil
+}
+
+// 作者 long：WireGuard 的 UDP bind 会保留旧 Network；重新绑定可让后续握手和数据改走当前网络。
+func (w *WireGuard) ResetNetwork() {
+	w.deviceMutex.Lock()
+	wgDevice := w.device
+	w.deviceMutex.Unlock()
+	if wgDevice == nil {
+		return
+	}
+	if err := wgDevice.BindUpdate(); err != nil {
+		log.Warnln("[WG](%s) reopen socket: %v", w.option.Name, err)
+	}
 }
 
 func (w *WireGuard) DialContext(ctx context.Context, metadata *C.Metadata) (_ C.Conn, err error) {

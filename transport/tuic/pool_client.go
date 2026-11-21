@@ -119,6 +119,22 @@ func (t *PoolClient) getClient(udp bool) Client {
 	}
 }
 
+// 作者 long：每个 TUIC 池都绑定创建时的网络；关闭并清空 TCP/UDP 客户端后，新请求会重建连接。
+func (t *PoolClient) ResetNetwork() {
+	retire := func(clients *list.List[Client], mutex *sync.Mutex) {
+		mutex.Lock()
+		defer mutex.Unlock()
+		for it := clients.Front(); it != nil; it = it.Next() {
+			if it.Value != nil {
+				it.Value.Close()
+			}
+		}
+		clients.Init()
+	}
+	retire(&t.tcpClients, &t.tcpClientsMutex)
+	retire(&t.udpClients, &t.udpClientsMutex)
+}
+
 func NewPoolClientV4(clientOption *ClientOptionV4, dialFn DialFunc) *PoolClient {
 	p := &PoolClient{
 		dialFn: dialFn,

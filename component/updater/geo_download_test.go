@@ -33,6 +33,41 @@ func (geoTimeoutError) Error() string   { return "net/http: TLS handshake timeou
 func (geoTimeoutError) Timeout() bool   { return true }
 func (geoTimeoutError) Temporary() bool { return true }
 
+// 作者 long：实际HTTP正文读取必须回报同一资源的累计字节和响应长度，供资源行展示下载比例。
+func TestGeoDownloadProgressReportsReceivedBytesAndLength(t *testing.T) {
+	body := bytes.Repeat([]byte("geo-data"), 8192)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Length", fmt.Sprint(len(body)))
+		w.Write(body)
+	}))
+	defer server.Close()
+	vehicle := resource.NewHTTPVehicle(server.URL, "", "", nil, time.Second, 0)
+	oldHook := GeoProgressHook
+	t.Cleanup(func() { GeoProgressHook = oldHook })
+	var updates []struct {
+		kind              string
+		downloaded, total int64
+		attempt           int
+	}
+	GeoProgressHook = func(kind string, downloaded, total int64, attempt int) {
+		updates = append(updates, struct {
+			kind              string
+			downloaded, total int64
+			attempt           int
+		}{kind, downloaded, total, attempt})
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	data, _, err := readGeoResourceWithin(ctx, "GEOSITE", vehicle, utils.HashType{}, 0)
+	if err != nil || !bytes.Equal(data, body) || len(updates) < 2 {
+		t.Fatalf("bytes=%d progress=%d err=%v", len(data), len(updates), err)
+	}
+	last := updates[len(updates)-1]
+	if last.kind != "GEOSITE" || last.downloaded != int64(len(body)) || last.total != int64(len(body)) || last.attempt != 1 {
+		t.Fatalf("final progress=%+v want bytes=%d", last, len(body))
+	}
+}
+
 type delayedFirstAcceptListener struct {
 	net.Listener
 	accepts atomic.Int32

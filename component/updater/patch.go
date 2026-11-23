@@ -9,6 +9,8 @@ import (
 
 var (
 	GeoUpdateHook func(geoType string, updating bool, skipped bool, updateErr error)
+	// 作者 long：下载进度独立于开始/终态hook，避免一次分块读取被当成新的更新生命周期。
+	GeoProgressHook func(geoType string, downloaded, total int64, attempt int)
 )
 
 func sendGeoUpdateStatus(geoType string, updating bool, skipped bool, updateErr error) {

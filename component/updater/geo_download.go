@@ -40,14 +40,27 @@ func readGeoResourceWithin(ctx context.Context, geoType string, vehicle *resourc
 			host = initial.Hostname()
 		}
 		status, length, retryAfter := 0, int64(-1), ""
+		progress := &geoProgressBody{kind: geoType, total: -1, attempt: attempt, last: time.Now()}
+		progress.emit()
 		vehicle.SetInRead(func(response *http.Response) {
 			status, length = response.StatusCode, response.ContentLength
 			retryAfter = response.Header.Get("Retry-After")
 			if response.Request != nil && response.Request.URL != nil {
 				host = response.Request.URL.Hostname()
 			}
+			if response.StatusCode >= 200 && response.StatusCode <= 299 {
+				progress.ReadCloser = response.Body
+				progress.total = response.ContentLength
+				// 作者 long：解压后的字节数不能除以压缩传输长度，未知长度只报已读量。
+				if response.Uncompressed || response.Header.Get("Content-Encoding") != "" {
+					progress.total = -1
+				}
+				response.Body = progress
+				progress.emit()
+			}
 		})
 		data, hash, err := vehicle.Read(ctx, oldHash)
+		progress.emit()
 		if err == nil {
 			log.Infoln("[GEO] resource=%s attempt=%d/%d host=%q status=%d bytes=%d length=%d elapsed_ms=%d outcome=downloaded",
 				geoType, attempt, geoDownloadAttempts, host, status, len(data), length, time.Since(started).Milliseconds())
@@ -81,6 +94,35 @@ func readGeoResourceWithin(ctx context.Context, geoType string, vehicle *resourc
 		}
 	}
 	panic("unreachable geo download attempt")
+}
+
+// 作者 long：保持原HTTP读取、重试和校验写入顺序；每次重试从0计数，最多每200ms回报，结束再补末值。
+type geoProgressBody struct {
+	io.ReadCloser
+	kind         string
+	bytes, total int64
+	attempt      int
+	last         time.Time
+}
+
+func (p *geoProgressBody) Read(buffer []byte) (int, error) {
+	n, err := p.ReadCloser.Read(buffer)
+	p.bytes += int64(n)
+	if time.Since(p.last) >= 200*time.Millisecond {
+		p.last = time.Now()
+		p.emit()
+	}
+	return n, err
+}
+
+func (p *geoProgressBody) emit() {
+	if GeoProgressHook != nil {
+		total := p.total
+		if total < p.bytes {
+			total = -1
+		}
+		GeoProgressHook(p.kind, p.bytes, total, p.attempt)
+	}
 }
 
 func geoDownloadFailure(err error, status int) (string, bool) {
